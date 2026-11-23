@@ -1,6 +1,6 @@
 import {api} from '../api.js';
-import {action, badge, closeDialog, dateRange, empty, errorText, esc, metric, notice, num, options, rate, showDialog, table} from '../components.js';
-import {isManager, runStates, state} from '../state.js';
+import {action, badge, closeDialog, dateRange, displayTime, empty, errorText, esc, metric, notice, num, options, rate, showDialog, table} from '../components.js';
+import {attemptOrigins, attemptStates, isManager, runStates, state} from '../state.js';
 
 const colors = ['#267459', '#235f9c', '#b64d25', '#745177', '#776031'];
 const runBadge = status => badge(runStates[status], {queued: 'neutral', review: 'amber', approved: 'green', failed: 'coral'}[status]);
@@ -43,11 +43,38 @@ function manualDialog(run, station, refresh) {
   });
 }
 
+function takeoverBlock(run) {
+  if (!isManager()) return '';
+  const status = run.takeover ?? {};
+  if (!status.eligible) return status.reason ? `<p class="muted takeover-hint">${esc(status.reason)}</p>` : '';
+  return `<div class="takeover-hint"><p>计算卡住或失败时，主管可用本轮冻结的样本立即重算。受理后，原计算即使晚回来也不会进入待确认。</p>
+    <button class="button primary" id="takeover-run">接管并重算</button></div>`;
+}
+
+function attemptPanel(run) {
+  if (!run.attempts?.length) return '';
+  const dispatchedSeq = run.attempts.find(row => row.dispatched)?.seq;
+  const note = dispatchedSeq ? `整改单按第 ${dispatchedSeq} 次计算的结果派发。` : '主管确认后才会派发整改单。';
+  return `<section class="paper"><header class="section-head"><div><h2>计算记录</h2><p>每次冻结样本计算的流转。${note}</p></div>${badge(`${run.attempts.length} 次`, 'neutral')}</header>
+    ${table(['次序', '来源', '状态', '操作者', '发起时间', '完成时间', '结果'], run.attempts.map(row => [
+      `#${row.seq}${row.active ? ` ${badge('当前', 'neutral')}` : ''}`,
+      attemptOrigins[row.origin] ?? row.origin,
+      badge(attemptStates[row.state] ?? row.state, {queued: 'neutral', ready: 'green', failed: 'coral', superseded: 'amber'}[row.state]),
+      esc(row.created_by),
+      displayTime(row.created_at),
+      row.finished_at ? displayTime(row.finished_at) : '—',
+      row.dispatched ? badge('派单依据', 'green') : row.state === 'superseded' ? '被接管作废，未进入待确认' : row.error ? esc(row.error) : '—',
+    ]))}</section>`;
+}
+
 function resultPanel(run) {
   const result = run.result;
-  if (!result) return run.state === 'failed'
-    ? empty('分群计算未完成', run.error)
-    : empty('正在计算分群', '后台正在处理输入快照。');
+  if (!result) {
+    const panel = run.state === 'failed'
+      ? empty('分群计算未完成', run.error)
+      : empty('正在计算分群', '后台正在处理输入快照。');
+    return `<section class="paper">${panel}${takeoverBlock(run)}</section>${attemptPanel(run)}`;
+  }
   const ready = run.state === 'review' && isManager();
   const aside = run.state === 'approved' ? `确认人 ${esc(run.reviewed_by)}` : '待发布，整改任务尚未派发';
   return `<section class="paper analysis"><header class="section-head"><div><h2>网点时效分布</h2><p>${dateRange({start: run.start_date, end: run.end_date})} · ${result.members.length} 家进入模型 · ${esc(aside)}</p></div>${ready ? '<button class="button primary" id="approve-run">确认分群并派单</button>' : runBadge(run.state)}</header>
@@ -61,7 +88,7 @@ function resultPanel(run) {
       const status = reviewed ? badge(`已人工确认 · ${reviewed.segment} 群`, 'green') : badge(row.count ? '待人工确认' : '待补采', 'amber');
       const button = run.state === 'approved' && isManager() && row.count && !reviewed ? `<button class="button" data-manual="${esc(row.code)}">人工确认</button>` : reviewed ? `<a href="#tasks">整改单 #${reviewed.task_id}</a>` : '—';
       return [`${esc(row.name)}<small>${esc(row.code)}</small>`, num(row.count), rate(row.late_rate), status, button];
-    })) : empty('没有待复核网点', '统计窗口内所有网点都达到本轮样本门槛。')}</section>`;
+    })) : empty('没有待复核网点', '统计窗口内所有网点都达到本轮样本门槛。')}</section>${attemptPanel(run)}`;
 }
 
 export async function workbench(node, refresh, current) {
@@ -82,6 +109,15 @@ export async function workbench(node, refresh, current) {
   if (run?.state === 'queued') {
     setTimeout(() => { if (current()) refresh(); }, 1400);
   }
+  const takeoverButton = node.querySelector('#takeover-run');
+  if (takeoverButton) takeoverButton.onclick = () => {
+    const requestKey = crypto.randomUUID?.() ?? `tk-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+    const dialog = showDialog(`接管分群计算 #${run.id}`, `<form class="form-stack"><p>将用本轮冻结的网点样本立即重算（K=${run.k}、最低 ${run.min_samples} 张）。受理后，原计算即使稍后返回也不会进入待确认；若重算失败，可再次发起接管。</p>${errorText}<div class="form-actions"><button type="submit" class="button primary">接管并重算</button></div></form>`);
+    action(dialog.querySelector('form'), async () => {
+      await api.takeover(run.id, {request_key: requestKey});
+      closeDialog(); notice('已接管并用冻结样本重算'); await refresh();
+    });
+  };
   if (!run?.result) return;
   plot(node.querySelector('canvas'), run.result);
   node.querySelectorAll('[data-segment]').forEach(button => { button.onclick = () => {
@@ -92,7 +128,8 @@ export async function workbench(node, refresh, current) {
   node.querySelectorAll('[data-manual]').forEach(button => { button.onclick = () => manualDialog(run, run.result.excluded.find(row => row.code === button.dataset.manual), refresh); });
   const approve = node.querySelector('#approve-run');
   if (approve) approve.onclick = () => {
-    const dialog = showDialog(`确认分群 #${run.id}`, `<form class="form-stack"><p>确认后将向超时整改群的网点派发任务。低样本网点须逐点人工复核。</p>${errorText}<div class="form-actions"><button type="submit" class="button primary">确认并派单</button></div></form>`);
-    action(dialog.querySelector('form'), async () => { await api.approve(run.id); closeDialog(); notice('主管已确认分群，整改任务已派发'); await refresh(); });
+    const activeSeq = run.attempts?.find(row => row.active)?.seq;
+    const dialog = showDialog(`确认分群 #${run.id}`, `<form class="form-stack"><p>确认第 ${activeSeq ?? '—'} 次计算的结果后，将向超时整改群的网点派发任务。低样本网点须逐点人工复核。</p>${errorText}<div class="form-actions"><button type="submit" class="button primary">确认并派单</button></div></form>`);
+    action(dialog.querySelector('form'), async () => { await api.approve(run.id, run.active_attempt_id); closeDialog(); notice('主管已确认分群，整改任务已派发'); await refresh(); });
   };
 }

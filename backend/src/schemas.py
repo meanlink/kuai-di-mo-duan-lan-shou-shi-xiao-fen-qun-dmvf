@@ -57,6 +57,14 @@ class ManualReview(Input):
     note: str = Field(min_length=12, max_length=400)
 
 
+class ApproveRun(Input):
+    attempt_id: int = Field(ge=1)
+
+
+class TakeoverRun(Input):
+    request_key: str = Field(pattern=r'^[A-Za-z0-9-]{8,64}$')
+
+
 class AdvanceTask(Input):
     status: TaskStatus
     evidence: str | None = Field(default=None, max_length=600)

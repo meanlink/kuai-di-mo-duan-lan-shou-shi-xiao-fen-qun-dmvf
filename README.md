@@ -53,6 +53,15 @@ docker compose up -d --build --wait
 - 群中心用原始业务单位展示。群内网点超时率均值达到 25% 时标为超时整改，主管确认后给该群所有入模网点派单。低样本有实测数据时需逐点选择现有分群并提供至少 12 字依据。零样本需先补采。人工操作保留原模型、入模列表与轮廓系数。
 - 整改单按「待处理 → 处理中 → 待复核 → 已结案」流转。提交复核须给出至少 12 字证据，只有主管可结案。一轮分群每家网点最多一单，到期日为派单当日北京时间加 3 天。
 
+## 计算接管与尝试台账
+
+- 分群运行的每次计算都登记为一次尝试（序号、来源、状态、操作者、起止时间）。运行状态与结果始终是最近一次尝试的镜像，聚类工作台的「计算记录」可逐次核对，确认派单的那次尝试标记为「派单依据」。
+- 排队超过 `RUN_STUCK_SECONDS` 秒（默认 60）未返回即视为卡住，或计算失败时，主管可在工作台「接管并重算」：系统用该轮冻结的网点样本同步重算。已派单的运行不能接管，计算完成待确认的请直接确认。
+- 接管受理后，原排队尝试立即作废；worker 在事务外计算、提交前校验尝试状态，被作废的迟到结果不会进入待确认。
+- 接管请求携带幂等键，同一次请求重试不会新增尝试；重算失败后可再次发起接管（使用新的幂等键）。
+- 主管确认时必须指定所看到的那次计算。接管与确认同时提交时由行锁保证先受理的生效，后到请求收到 409 并提示刷新。
+- 演练接管可执行 `docker compose stop worker` 后发起分群，等待约 60 秒，工作台上会出现「接管并重算」。
+
 ## 班次复测与支援调度
 
 - **班次复测**。整改单提交整改证据后，从「整改跟踪」定位该单并安排复测。复测营业日在原分群窗口结束后 14 天内。同一整改单只建一张复测单。保存计划时，统计原分群日期内已入账的同网点、同班次批次，冻结基线的面单数、超时数和批次号。两组都沿用分群快照的 SLA，且分别至少需要 12 张面单。复测采集成功后冻结复测批次。主管填写意见签核，复测超时率不高于 25% 且比基线至少下降 10 个百分点才达标。
@@ -81,7 +90,7 @@ docker compose up -d --build --wait
 | `db` | MySQL 8.0，存网点、批次、面单、分群和整改状态 |
 | `redis` | 登录限流及进程依赖探活 |
 
-修改源码后用 `docker compose up -d --build --wait` 重建。CSS 和页面模块在 `frontend/src/`，模型在 `backend/src/models.py`，扫描口径在 `scans.py`，算法在 `clustering.py`，派单与流转在 `review.py`，演示数据在 `backend/scripts/seed_demo.py`。`db`、`redis` 与 worker 心跳目录用 Compose 命名卷。端口由 `.env` 的 `FRONTEND_PORT`、`BACKEND_PORT`、`DB_PORT` 指定。`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` 为数据库配置。`JWT_SECRET` 为 JWT 签名密钥，`SEED_DEMO` 控制启动种子数据。
+修改源码后用 `docker compose up -d --build --wait` 重建。CSS 和页面模块在 `frontend/src/`，模型在 `backend/src/models.py`，扫描口径在 `scans.py`，算法在 `clustering.py`，派单与流转在 `review.py`，演示数据在 `backend/scripts/seed_demo.py`。`db`、`redis` 与 worker 心跳目录用 Compose 命名卷。端口由 `.env` 的 `FRONTEND_PORT`、`BACKEND_PORT`、`DB_PORT` 指定。`MYSQL_DATABASE`、`MYSQL_USER`、`MYSQL_PASSWORD`、`MYSQL_ROOT_PASSWORD` 为数据库配置。`JWT_SECRET` 为 JWT 签名密钥，`SEED_DEMO` 控制启动种子数据，`RUN_STUCK_SECONDS` 为判定计算卡住的秒数（默认 60）。接管与确认的端到端逻辑测试在 `backend/tests/`，安装 pytest 后在 `backend/` 下运行 `python -m pytest tests/`。
 
 共享枚举定义位置如下。
 
@@ -90,6 +99,8 @@ docker compose up -d --build --wait
 | 班次 `morning / afternoon / evening` | `models.py` 的 `PickupBatch.shift`，`schemas.py` 的 `Shift` | `state.js` 的 `shifts` |
 | 整改 `open / doing / resolved / closed` | `models.py` 的 `RemediationTask.status`，`schemas.py` 的 `TaskStatus` | `state.js` 的 `taskStates` |
 | 分群 `queued / review / approved / failed` | `models.py` 的 `ClusterRun.state`，`worker.py` 与 `review.py` 的状态迁移 | `state.js` 的 `runStates` |
+| 计算尝试 `queued / ready / failed / superseded` | `models.py` 的 `ClusterAttempt.state`，`worker.py` 与 `review.py` 的状态迁移 | `state.js` 的 `attemptStates` |
+| 尝试来源 `initial / takeover` | `models.py` 的 `ClusterAttempt.origin` | `state.js` 的 `attemptOrigins` |
 | 复测 `scheduled / measured / passed / failed` | `expansion_models.py`、`expansion.py` | `state.js` 的 `followupStates` |
 | 支援 `requested / approved / returned / completed` | `expansion_models.py`、`expansion.py`，审批输入在 `expansion_schemas.py` | `state.js` 的 `supportStates` |
 | 交接证据判定 `insufficient / breach / clear` | `handoff_models.py`、`handoff_metrics.py` | `state.js` 的 `handoffVerdicts` |

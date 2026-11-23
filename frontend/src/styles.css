@@ -157,6 +157,9 @@ summary { cursor: pointer; padding: 5px 0; font-weight: 650; }
 .empty, .loading { padding: 35px 22px; border: 1px dashed var(--line); color: var(--muted); background: var(--paper); }
 .empty strong { color: var(--ink); font-size: 1.12rem; }
 .empty p { margin: 5px 0; }
+.takeover-hint { padding: 0 22px 20px; margin: 0; }
+p.takeover-hint { padding-top: 14px; }
+.takeover-hint p { color: var(--muted); margin: 0 0 10px; }
 .notice { position: fixed; bottom: 20px; right: 22px; padding: 12px 18px; max-width: min(425px, calc(100vw - 44px)); background: var(--navy); color: var(--paper); border-left: 4px solid var(--yellow); border-radius: 4px; z-index: 10; animation: settle .18s cubic-bezier(.14,.75,.24,1) both; }
 dialog { padding: 0; border: 1px solid var(--line); background: var(--paper); color: var(--ink); border-radius: 6px; width: min(820px, calc(100vw - 28px)); max-height: calc(100vh - 38px); }
 dialog[open] { animation: settle .2s cubic-bezier(.14,.75,.24,1) both; }

@@ -17,7 +17,7 @@ from .db import Base, cache, engine, session
 from .expansion_routes import router as expansion_router
 from .handoff_routes import router as handoff_router
 from .models import AuditEvent, ClusterRun, PickupBatch, RemediationTask
-from .schemas import AdvanceTask, ImportBatch, Login, ManualReview, RunRequest, Window, validate_window
+from .schemas import AdvanceTask, ApproveRun, ImportBatch, Login, ManualReview, RunRequest, TakeoverRun, Window, validate_window
 
 log = logging.getLogger('uvicorn.error')
 
@@ -25,6 +25,10 @@ log = logging.getLogger('uvicorn.error')
 @asynccontextmanager
 async def lifespan(_app):
     Base.metadata.create_all(engine)
+    try:
+        review.backfill_attempts()
+    except Exception:
+        log.exception('Attempt backfill failed. Existing runs keep working after retry on next start.')
     if os.getenv('SEED_DEMO', 'true').lower() == 'true':
         try:
             seed()
@@ -118,8 +122,13 @@ def run_detail(run_id: int, db=Depends(session), _user=Depends(current_user)):
 
 
 @app.post('/runs/{run_id}/approve')
-def approve(run_id: int, db=Depends(session), user=Depends(allow('admin'))):
-    return review.approve(db, run_id, user.username)
+def approve(run_id: int, payload: ApproveRun, db=Depends(session), user=Depends(allow('admin'))):
+    return review.approve(db, run_id, payload, user.username)
+
+
+@app.post('/runs/{run_id}/takeover')
+def takeover(run_id: int, payload: TakeoverRun, db=Depends(session), user=Depends(allow('admin'))):
+    return review.takeover(db, run_id, payload, user.username)
 
 
 @app.post('/runs/{run_id}/manual/{station_code}', status_code=201)

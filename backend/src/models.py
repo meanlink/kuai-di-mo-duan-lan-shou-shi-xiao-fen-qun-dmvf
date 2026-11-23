@@ -76,6 +76,25 @@ class ClusterRun(Base):
     reviewed_at = col(DateTime)
 
 
+class ClusterAttempt(Base):
+    """一次分群计算尝试。运行的最新一次尝试决定 cluster_runs 的状态与结果镜像。"""
+    __tablename__ = 'cluster_attempts'
+    __table_args__ = (UniqueConstraint('run_id', 'seq'),)
+    id: Mapped[int] = col(primary_key=True)
+    run_id: Mapped[int] = col(ForeignKey('cluster_runs.id'), index=True)
+    seq: Mapped[int] = col(Integer)
+    origin: Mapped[str] = col(Enum('initial', 'takeover'))
+    state: Mapped[str] = col(Enum('queued', 'ready', 'failed', 'superseded'), default='queued', index=True)
+    result: Mapped[dict | None] = col(JSON, nullable=True)
+    error: Mapped[str | None] = col(String(240))
+    request_key: Mapped[str | None] = col(String(64), unique=True)
+    created_by: Mapped[str] = col(ForeignKey('users.username'))
+    created_at = col(DateTime, nullable=False, default=utcnow)
+    finished_at = col(DateTime)
+    dispatched_at = col(DateTime)
+    run: Mapped[ClusterRun] = relationship()
+
+
 class RemediationTask(Base):
     __tablename__ = 'remediation_tasks'
     __table_args__ = (UniqueConstraint('run_id', 'station_code'),)

@@ -8,6 +8,7 @@ x-python: &python
     MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pickup-local-1044}
     JWT_SECRET: ${JWT_SECRET:-pickup-demo-1044-only-change-in-production}
     SEED_DEMO: ${SEED_DEMO:-true}
+    RUN_STUCK_SECONDS: ${RUN_STUCK_SECONDS:-60}
     REDIS_URL: redis://redis:6379/0
   depends_on:
     db: {condition: service_healthy}

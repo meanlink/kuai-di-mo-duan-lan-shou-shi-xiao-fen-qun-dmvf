@@ -14,6 +14,8 @@ export const roles = {admin: '区域主管', analyst: '网点运营', viewer: '�
 export const shifts = {morning: '早班', afternoon: '午后班', evening: '晚班'};
 export const taskStates = {open: '待处理', doing: '处理中', resolved: '待复核', closed: '已结案'};
 export const runStates = {queued: '计算中', review: '待主管确认', approved: '已确认', failed: '计算失败'};
+export const attemptStates = {queued: '排队中', ready: '计算完成', failed: '计算失败', superseded: '已被接管'};
+export const attemptOrigins = {initial: '初始计算', takeover: '主管接管'};
 export const canOperate = () => ['admin', 'analyst'].includes(state.user?.role);
 export const isManager = () => state.user?.role === 'admin';
 export function setUser(user) {
