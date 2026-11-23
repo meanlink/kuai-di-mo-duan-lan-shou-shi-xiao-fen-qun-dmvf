@@ -1,0 +1,83 @@
+name: courier-pickup-clusters
+x-python: &python
+  build: ./backend
+  environment:
+    MYSQL_HOST: db
+    MYSQL_DATABASE: ${MYSQL_DATABASE:-pickup}
+    MYSQL_USER: ${MYSQL_USER:-pickup}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pickup-local-1044}
+    JWT_SECRET: ${JWT_SECRET:-pickup-demo-1044-only-change-in-production}
+    SEED_DEMO: ${SEED_DEMO:-true}
+    REDIS_URL: redis://redis:6379/0
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+  volumes:
+    - work:/work
+services:
+  frontend:
+    container_name: ${COMPOSE_PROJECT_NAME:-courier-pickup-clusters}-frontend
+    build: ./frontend
+    ports:
+      - '127.0.0.1:${FRONTEND_PORT:-18243}:80'
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, wget, -qO-, http://127.0.0.1/api/health]
+      interval: 4s
+      timeout: 3s
+      retries: 15
+  backend:
+    <<: *python
+    container_name: ${COMPOSE_PROJECT_NAME:-courier-pickup-clusters}-backend
+    ports:
+      - '127.0.0.1:${BACKEND_PORT:-19243}:8000'
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=2)"]
+      interval: 4s
+      timeout: 3s
+      retries: 15
+  worker:
+    <<: *python
+    container_name: ${COMPOSE_PROJECT_NAME:-courier-pickup-clusters}-worker
+    command: [python, -m, src.worker]
+    depends_on:
+      db: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, python, -m, src.worker, health]
+      interval: 4s
+      timeout: 3s
+      retries: 20
+  db:
+    container_name: ${COMPOSE_PROJECT_NAME:-courier-pickup-clusters}-db
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-pickup}
+      MYSQL_USER: ${MYSQL_USER:-pickup}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-pickup-local-1044}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-local-1044}
+    ports:
+      - '127.0.0.1:${DB_PORT:-17743}:3306'
+    volumes:
+      - mysql:/var/lib/mysql
+    healthcheck:
+      test: [CMD-SHELL, 'mysql --protocol=TCP -h 127.0.0.1 -u"$$MYSQL_USER" -p"$$MYSQL_PASSWORD" "$$MYSQL_DATABASE" -e "SELECT 1" >/dev/null 2>&1']
+      interval: 4s
+      timeout: 4s
+      retries: 35
+  redis:
+    container_name: ${COMPOSE_PROJECT_NAME:-courier-pickup-clusters}-redis
+    image: redis:7-alpine
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 4s
+      timeout: 3s
+      retries: 15
+volumes:
+  mysql:
+  redis:
+  work:
